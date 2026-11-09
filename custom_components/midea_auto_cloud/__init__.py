@@ -327,6 +327,48 @@ def _write_lua_support_file(path: str, content: str) -> None:
         fp.write(content)
 
 
+def _find_cached_lua_file(path: str, device_type, sn8) -> str | None:
+    """返回本地已缓存的设备 Lua（fork 定制）。
+
+    原版每次启动都会向云端重新拉取 Lua（文件名带日期），也就是说设备协议的
+    字段语义随时可能被 Midea 换掉；而 T0xE3 的温标换算正是建立在当前这份 Lua
+    的语义上（temperature = cmd[17]，无缩放）。这里优先复用一份已经跑通的
+    缓存，让 fork 的行为可复现；只有找不到可用缓存时才回退到下载。
+    """
+    if not device_type or not sn8:
+        return None
+    try:
+        device_type_hex = "%02X" % int(device_type)
+    except (TypeError, ValueError):
+        return None
+    suffix = f"_{device_type_hex}_{sn8}_"
+    try:
+        names = os.listdir(path)
+    except OSError:
+        return None
+
+    candidates = []
+    for name in names:
+        if not (name.startswith("T_") and name.endswith(".lua")) or suffix not in name:
+            continue
+        full = os.path.join(path, name)
+        try:
+            if os.path.getsize(full) < 1024:
+                continue
+            with open(full, "r", encoding="utf-8", errors="ignore") as fp:
+                head = fp.read(4096)
+            # 内容自检：确认是设备 Lua 而不是半截文件
+            if "VALUE_VERSION" not in head:
+                continue
+            candidates.append(full)
+        except OSError:
+            continue
+
+    if not candidates:
+        return None
+    return max(candidates, key=os.path.getmtime)
+
+
 async def async_setup(hass: HomeAssistant, config: ConfigType):
     hass.data.setdefault(DOMAIN, {})
     os.makedirs(hass.config.path(STORAGE_PATH), exist_ok=True)
@@ -522,17 +564,29 @@ async def async_setup_entry(hass: HomeAssistant, config_entry: ConfigEntry):
                         path = hass.config.path(STORAGE_PATH)
                         file = None
 
+                        # fork 定制：优先复用已缓存的 Lua，避免云端换代后协议语义悄悄改变
                         try:
-                            file = await cloud.download_lua(
-                                path=path,
-                                device_type=info.get(CONF_TYPE),
-                                sn=info.get(CONF_SN),
-                                model_number=info.get(CONF_MODEL_NUMBER),
-                                manufacturer_code=info.get(CONF_MANUFACTURER_CODE),
-                                smart_product_id=info.get(CONF_SMART_PRODUCT_ID),
+                            file = _find_cached_lua_file(
+                                path, info.get(CONF_TYPE), info.get(CONF_SN8)
                             )
                         except Exception as e:
-                            MideaLogger.warning(f"Failed to download lua for {info.get(CONF_NAME)}: {e}")
+                            MideaLogger.warning(f"Cached lua lookup failed: {e}")
+                            file = None
+
+                        if file:
+                            MideaLogger.info(f"Using cached lua: {os.path.basename(file)}")
+                        else:
+                            try:
+                                file = await cloud.download_lua(
+                                    path=path,
+                                    device_type=info.get(CONF_TYPE),
+                                    sn=info.get(CONF_SN),
+                                    model_number=info.get(CONF_MODEL_NUMBER),
+                                    manufacturer_code=info.get(CONF_MANUFACTURER_CODE),
+                                    smart_product_id=info.get(CONF_SMART_PRODUCT_ID),
+                                )
+                            except Exception as e:
+                                MideaLogger.warning(f"Failed to download lua for {info.get(CONF_NAME)}: {e}")
 
                         try:
                             os.makedirs(hass.config.path(STORAGE_PLUGIN_PATH), exist_ok=True)
