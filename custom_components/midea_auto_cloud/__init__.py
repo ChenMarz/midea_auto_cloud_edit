@@ -57,15 +57,7 @@ PLATFORMS: list[Platform] = [
     Platform.SWITCH,
     Platform.CLIMATE,
     Platform.SELECT,
-    Platform.WATER_HEATER,
-    Platform.FAN,
-    Platform.LIGHT,
-    Platform.HUMIDIFIER,
     Platform.NUMBER,
-    Platform.BUTTON,
-    Platform.VACUUM,
-    Platform.COVER,
-    Platform.TEXT,
     Platform.LOCK,
 ]
 
@@ -732,11 +724,9 @@ async def async_setup_entry(hass: HomeAssistant, config_entry: ConfigEntry):
                                         str(Platform.SENSOR),
                                         str(Platform.BINARY_SENSOR),
                                         str(Platform.SWITCH),
-                                        str(Platform.FAN),
                                         str(Platform.SELECT),
-                                        str(Platform.VACUUM),
                                         str(Platform.LOCK),
-                                        str(Platform.TEXT),
+                                        str(Platform.NUMBER),
                                     ]:
                                         for entity_key in platform_cfg.keys():
                                             preset_keys.add(entity_key)
@@ -745,8 +735,6 @@ async def async_setup_entry(hass: HomeAssistant, config_entry: ConfigEntry):
                                     if k not in device.attributes:
                                         device.attributes[k] = None
                                 # 针对T0xD9复式洗衣机，设置默认的筒选择为左筒
-                                if device.device_type == 0xD9:
-                                    device.attributes["db_location_selection"] = "left"
                             except Exception:
                                 pass
 
